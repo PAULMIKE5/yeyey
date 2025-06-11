@@ -52,9 +52,11 @@ const ReferralPage: React.FC = () => {
               <ClipboardIcon className="w-5 h-5 text-gray-300" />
             </button>
           </div>
-          {TELEGRAM_BOT_USERNAME === "YOUR_BOT_USERNAME_HERE" && (
-            <p className="text-xs text-orange-400 mt-2">Note: Please configure your bot's username in constants.tsx for this link to work.</p>
-          )}
+          {/* 
+            The check for "YOUR_BOT_USERNAME_HERE" has been removed.
+            The developer is responsible for setting TELEGRAM_BOT_USERNAME in constants.tsx.
+            A comment in constants.tsx serves as the primary reminder.
+          */}
         </div>
 
         {copied && <p className="text-green-400 mb-4">Copied to clipboard!</p>}
@@ -63,13 +65,8 @@ const ReferralPage: React.FC = () => {
           variant="gradient" 
           className="w-full py-3 text-lg" 
           onClick={() => {
-            if (TELEGRAM_BOT_USERNAME === "YOUR_BOT_USERNAME_HERE") {
-              alert("Please configure your bot's username in the code (constants.tsx) before sharing.");
-              return;
-            }
-            // Basic share functionality (developer can enhance this)
-            // For Telegram, it's often better to just have users copy the link
-            // or use a direct share URL if available and appropriate for mini-apps
+            // The check for "YOUR_BOT_USERNAME_HERE" has been removed.
+            // It's assumed TELEGRAM_BOT_USERNAME is correctly set in constants.tsx.
             const shareText = `Join and earn! Use my referral code: ${user.referralCode} or click the link: ${referralLink}`;
             if (navigator.share) {
               navigator.share({

@@ -6,16 +6,15 @@ import EarnPage from './pages/EarnPage';
 import WithdrawalPage from './pages/WithdrawalPage';
 import ReferralPage from './pages/ReferralPage';
 import ProfilePage from './pages/ProfilePage';
-import AdminPage from './pages/AdminPage'; // Ensured relative path
+import AdminPage from './pages/AdminPage';
 import Navbar from './components/Navbar';
 import { UserContext, User, WithdrawalRequest, UserContextType } from './contexts/UserContext';
 import {} from './types/telegram'; 
 import { ADMIN_USER_ID } from './constants';
 
-// localStorage key
 const WITHDRAWAL_REQUESTS_STORAGE_KEY = 'earningAppWithdrawalRequests';
+const ALL_USERS_STORAGE_KEY = 'earningAppAllUsers';
 
-// Initial users: Only the admin user as a base. Others will be added dynamically.
 const initialMockUsers: User[] = [
   { 
     userId: ADMIN_USER_ID, 
@@ -28,19 +27,48 @@ const initialMockUsers: User[] = [
   }
 ];
 
-
 const App: React.FC = () => {
+  const [allUsers, setAllUsers] = useState<User[]>(() => {
+    let loadedUsers: User[] = [];
+    try {
+        const storedUsers = localStorage.getItem(ALL_USERS_STORAGE_KEY);
+        if (storedUsers) {
+            loadedUsers = JSON.parse(storedUsers);
+        }
+    } catch (error) {
+        console.error("Failed to load all users from localStorage:", error);
+        // loadedUsers remains empty
+    }
+
+    const adminDefault = initialMockUsers.find(u => u.userId === ADMIN_USER_ID)!;
+    const adminInLoaded = loadedUsers.find(u => u.userId === ADMIN_USER_ID);
+
+    if (!adminInLoaded) {
+        // If admin is not in loadedUsers (e.g. localStorage was empty or admin was missing),
+        // add the default admin to the list.
+        // We use a temporary array to avoid mutating loadedUsers if it was empty.
+        const usersWithAdmin = [...loadedUsers.filter(u => u.userId !== ADMIN_USER_ID), adminDefault];
+        return usersWithAdmin;
+    }
+    
+    // If loadedUsers is empty and the above logic didn't add admin (which it should have),
+    // or if we want a hard fallback.
+    if (loadedUsers.length === 0) {
+        return initialMockUsers; 
+    }
+
+    return loadedUsers;
+  });
+  
   const [currentUser, setCurrentUser] = useState<User>({
     name: 'User',
     earnings: 0,
-    referralCode: 'NOTSET', // Will be set based on Telegram ID
+    referralCode: 'NOTSET',
     photoUrl: undefined,
     userId: undefined,
     walletAddress: '',
     isBanned: false,
   });
-
-  const [allUsers, setAllUsers] = useState<User[]>(initialMockUsers);
   
   const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalRequest[]>(() => {
     try {
@@ -54,85 +82,111 @@ const App: React.FC = () => {
 
   useEffect(() => {
     try {
+      localStorage.setItem(ALL_USERS_STORAGE_KEY, JSON.stringify(allUsers));
+    } catch (error) {
+      console.error("Failed to save all users to localStorage:", error);
+    }
+  }, [allUsers]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(WITHDRAWAL_REQUESTS_STORAGE_KEY, JSON.stringify(withdrawalRequests));
     } catch (error) {
       console.error("Failed to save withdrawal requests to localStorage:", error);
     }
   }, [withdrawalRequests]);
 
-
   useEffect(() => {
     if (window.Telegram && window.Telegram.WebApp) {
       const tg = window.Telegram.WebApp;
       tg.ready();
-
       const tgUser = tg.initDataUnsafe?.user;
 
-      if (tgUser) {
-        let displayName = 'User';
+      if (tgUser && tgUser.id) {
+        const fetchedUserId = tgUser.id;
+        let displayName = tgUser.first_name || tgUser.username || 'User';
         if (tgUser.first_name && tgUser.last_name) {
           displayName = `${tgUser.first_name} ${tgUser.last_name}`;
-        } else if (tgUser.first_name) {
-          displayName = tgUser.first_name;
-        } else if (tgUser.username) {
-          displayName = tgUser.username;
         }
-        
-        const referral = tgUser.id ? `TG${tgUser.id}` : 'NOTSETYET';
-        const fetchedUserId = tgUser.id;
+        const referral = `TG${fetchedUserId}`;
 
-        // Determine initial earnings for the current user when they first load the app
-        // This tries to load from allUsers, or defaults for a brand new user
-        const existingUserRecord = allUsers.find(u => u.userId === fetchedUserId);
-        const initialEarnings = existingUserRecord ? existingUserRecord.earnings : 0; // Default to 0 for new users
-        const initialJoinDate = existingUserRecord ? existingUserRecord.joinDate : new Date().toISOString().split('T')[0];
-        const initialIsBanned = existingUserRecord ? existingUserRecord.isBanned : false;
+        // Data from allUsers state (which should be from localStorage or initialMockUsers)
+        const userRecordFromState = allUsers.find(u => u.userId === fetchedUserId);
 
+        let resolvedEarnings: number;
+        let resolvedIsBanned: boolean;
+        let resolvedJoinDate: string;
+        let resolvedWalletAddress: string | undefined;
 
-        setCurrentUser(prevUser => ({
-          ...prevUser,
+        if (userRecordFromState) {
+          resolvedEarnings = userRecordFromState.earnings;
+          resolvedIsBanned = userRecordFromState.isBanned || false;
+          resolvedJoinDate = userRecordFromState.joinDate || new Date().toISOString().split('T')[0];
+          resolvedWalletAddress = userRecordFromState.walletAddress;
+        } else { // User not in current allUsers state (genuinely new or localStorage was empty for this user)
+          if (fetchedUserId === ADMIN_USER_ID) {
+            const adminDefaults = initialMockUsers.find(u => u.userId === ADMIN_USER_ID)!;
+            resolvedEarnings = adminDefaults.earnings;
+            resolvedIsBanned = adminDefaults.isBanned;
+            resolvedJoinDate = adminDefaults.joinDate!;
+            resolvedWalletAddress = adminDefaults.walletAddress;
+          } else {
+            resolvedEarnings = 0;
+            resolvedIsBanned = false;
+            resolvedJoinDate = new Date().toISOString().split('T')[0];
+            resolvedWalletAddress = '';
+          }
+        }
+
+        setCurrentUser({
           userId: fetchedUserId,
           name: displayName,
           photoUrl: tgUser.photo_url,
           referralCode: referral,
-          earnings: initialEarnings, // Set earnings from existing record or default
-          isBanned: initialIsBanned,
-          joinDate: initialJoinDate
-        }));
-        
-        setAllUsers(prevAllUsers => {
-          const userExists = prevAllUsers.some(u => u.userId === fetchedUserId);
-          
-          if (fetchedUserId === ADMIN_USER_ID) {
-            return prevAllUsers.map(u => 
-              u.userId === ADMIN_USER_ID 
-              ? { ...u, name: displayName, photoUrl: tgUser.photo_url, referralCode: referral, userId: fetchedUserId, earnings: u.earnings, isBanned: u.isBanned, joinDate: u.joinDate } 
-              : u
-            );
-          } else if (userExists) {
-            return prevAllUsers.map(u => 
-              u.userId === fetchedUserId 
-              ? { ...u, name: displayName, photoUrl: tgUser.photo_url, referralCode: referral, earnings: u.earnings, isBanned: u.isBanned, joinDate: u.joinDate } 
-              : u
-            );
-          } else if (fetchedUserId) {
-            const newUser: User = { 
-              userId: fetchedUserId, 
-              name: displayName, 
-              earnings: 0, // New users start with 0 earnings
-              referralCode: referral, 
-              photoUrl: tgUser.photo_url, 
-              isBanned: false, 
-              joinDate: new Date().toISOString().split('T')[0] 
-            };
-            return [...prevAllUsers, newUser].sort((a,b) => (a.joinDate && b.joinDate) ? new Date(a.joinDate).getTime() - new Date(b.joinDate).getTime() : 0);
-          }
-          return prevAllUsers; 
+          earnings: resolvedEarnings,
+          isBanned: resolvedIsBanned,
+          joinDate: resolvedJoinDate,
+          walletAddress: resolvedWalletAddress || '',
         });
 
+        setAllUsers(prevAllUsers => {
+          const userExistsInPrev = prevAllUsers.some(u => u.userId === fetchedUserId);
+          if (userExistsInPrev) {
+            return prevAllUsers.map(u =>
+              u.userId === fetchedUserId
+                ? {
+                    ...u, // Spread existing fields from state
+                    name: displayName, // Update from Telegram
+                    photoUrl: tgUser.photo_url, // Update from Telegram
+                    referralCode: referral, // Update from Telegram
+                    // Persisted fields should be taken from resolvedValues,
+                    // which reflect `userRecordFromState` or appropriate defaults
+                    earnings: resolvedEarnings, 
+                    isBanned: resolvedIsBanned,
+                    joinDate: resolvedJoinDate,
+                    // walletAddress is part of `...u` or handled by resolvedWalletAddress for currentUser
+                  }
+                : u
+            );
+          } else { // New user to add to allUsers state
+            const newUser: User = {
+              userId: fetchedUserId,
+              name: displayName,
+              earnings: resolvedEarnings,
+              referralCode: referral,
+              photoUrl: tgUser.photo_url,
+              isBanned: resolvedIsBanned,
+              joinDate: resolvedJoinDate,
+              walletAddress: resolvedWalletAddress || '',
+            };
+            return [...prevAllUsers, newUser].sort((a,b) => (a.joinDate && b.joinDate) ? new Date(b.joinDate).getTime() - new Date(a.joinDate).getTime() : 0);
+          }
+        });
       }
     }
-  }, []); // Run once on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount for Telegram initialization
+
 
   const addEarnings = useCallback((amount: number) => {
     setCurrentUser(prevUser => ({ ...prevUser, earnings: prevUser.earnings + amount }));
@@ -150,7 +204,10 @@ const App: React.FC = () => {
   
   const setWalletAddress = useCallback((address: string) => {
     setCurrentUser(prevUser => ({...prevUser, walletAddress: address}));
-  }, []);
+     if (currentUser.userId) {
+        setAllUsers(prev => prev.map(u => u.userId === currentUser.userId ? {...u, walletAddress: address} : u));
+    }
+  }, [currentUser.userId]);
 
   const setTelegramUser = useCallback((telegramUser: Partial<User>) => {
     setCurrentUser(prevUser => ({...prevUser, ...telegramUser}));
@@ -166,7 +223,6 @@ const App: React.FC = () => {
         return false;
     }
 
-    // Deduct earnings immediately
     const newEarnings = currentUser.earnings - request.amount;
     setCurrentUser(prevUser => ({ ...prevUser, earnings: newEarnings }));
     setAllUsers(prevAll => prevAll.map(u => 
@@ -188,21 +244,18 @@ const App: React.FC = () => {
   const updateWithdrawalStatus = useCallback((requestId: string, status: 'approved' | 'declined') => {
     setWithdrawalRequests(prevRequests =>
       prevRequests.map(req => {
-        if (req.id === requestId && req.status === 'pending') { // Only update pending requests
+        if (req.id === requestId && req.status === 'pending') { 
           if (status === 'declined') {
-            // Refund the amount to the user
             setAllUsers(prevAll => prevAll.map(u => {
               if (u.userId === req.userId) {
                 return {...u, earnings: (u.earnings || 0) + req.amount };
               }
               return u;
             }));
-            // If current user is the one whose request is declined, update their earnings too
             if(currentUser.userId === req.userId) {
                 setCurrentUser(prevCU => ({...prevCU, earnings: (prevCU.earnings || 0) + req.amount}));
             }
           }
-          // If approved, earnings were already deducted on submission. No change to earnings here.
           return { ...req, status };
         }
         return req;
@@ -249,12 +302,11 @@ const App: React.FC = () => {
     );
   }
 
-
   return (
     <UserContext.Provider value={userContextValue}>
       <HashRouter>
         <div className="flex flex-col min-h-screen bg-gradient-to-b from-[#1A1032] to-[#0F0A21] text-white font-sans max-w-lg mx-auto shadow-2xl">
-          <main className="flex-grow overflow-y-auto scrollbar-thin scrollbar-thumb-purple-700 scrollbar-track-purple-900 pb-16"> {/* Added pb-16 for navbar */}
+          <main className="flex-grow overflow-y-auto scrollbar-thin scrollbar-thumb-purple-700 scrollbar-track-purple-900 pb-16">
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/earn" element={<EarnPage />} />
@@ -275,3 +327,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+    
