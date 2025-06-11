@@ -1,0 +1,5 @@
+{
+  "name": "Crazy Developer Earning App",
+  "description": "A web application interface for an earning platform, featuring home, earn, withdraw, referral, and profile sections, designed to mimic a mobile app experience.",
+  "requestFramePermissions": []
+}
